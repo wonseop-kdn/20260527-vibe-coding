@@ -48,6 +48,8 @@ const Modal={
 const App={
   currentProjectId:null,
   currentProjectName:'',
+  _currentPage:null,
+  _PHASE_LABEL:{'수주':'수주','발주':'발주','청구':'청구 및 완료'},
 
   // ─── init ───
   async init(){
@@ -181,6 +183,7 @@ const App={
 
   // ─── Navigate ───
   async navigate(page,param){
+    App._currentPage=page;
     document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
     const content=document.getElementById('page-content');
     const bc=document.getElementById('breadcrumb');
@@ -191,7 +194,8 @@ const App={
         content.innerHTML=await Pages.dashboard();
       } else if(page.startsWith('process-')){
         const phase=page.split('-')[1];
-        bc.innerHTML=`<span>프로세스</span><span class="crumb-sep">›</span><span class="crumb-current">${phase}</span>`;
+        const label=App._PHASE_LABEL[phase]||phase;
+        bc.innerHTML=`<span>프로세스</span><span class="crumb-sep">›</span><span class="crumb-current">${label}</span>`;
         content.innerHTML=await Pages.processView(phase);
       } else if(page==='project'){
         const pid=param||App.currentProjectId;
@@ -315,6 +319,15 @@ const App={
 
       <!-- Manual tab -->
       <div id="tab-manual">
+        <div style="display:flex;align-items:center;gap:12px;background:var(--s50);border:1.5px dashed var(--s200);border-radius:var(--r-md);padding:10px 14px;margin-bottom:14px">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="18" style="color:var(--s400);flex-shrink:0"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
+          <span style="font-size:12px;color:var(--s500);flex:1">구매규격서 PDF를 올리면 사업금액·담당자·기간을 자동 입력합니다</span>
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer;margin:0">
+            PDF 자동입력
+            <input type="file" id="np-pdf-input" accept=".pdf" style="display:none" onchange="App.parsePDF(this)">
+          </label>
+          <span id="np-pdf-status" style="font-size:11px;color:var(--s500);white-space:nowrap"></span>
+        </div>
         <div class="form-grid cols-2">
           <div class="form-field full">
             <label class="form-label">사업명 <span class="req">*</span></label>
@@ -564,14 +577,29 @@ const App={
 
   // ─── Steps ───
   async toggleStep(stepId,projectId){
+    // 현재 DOM 상태에서 done 여부 읽기 (불필요한 DB 조회 제거)
+    const tlCard=document.getElementById(`tl-${stepId}`);
+    const procStep=document.querySelector(`button[onclick*="'${stepId}'"]`)?.closest('.proc-step');
+    const checkBtn=tlCard?.querySelector('.tl-check')||procStep?.querySelector('.tl-check');
+    const wasDone=checkBtn?.classList.contains('checked')??false;
+    const nowDone=!wasDone;
+    // 즉시 UI 반영 (optimistic update)
+    checkBtn?.classList.toggle('checked',nowDone);
+    tlCard?.classList.toggle('done',nowDone);
+    procStep?.classList.toggle('done',nowDone);
     try{
-      const steps=await DB.getSteps(projectId);
-      const step=steps.find(s=>s.id===stepId);
-      if(!step)return;
-      await DB.updateStep(stepId,{done:!step.done,done_at:!step.done?new Date().toISOString():null});
-      App.navigate('project',projectId);
+      await DB.updateStep(stepId,{done:nowDone,done_at:nowDone?new Date().toISOString():null});
+      const cur=App._currentPage;
+      if(cur?.startsWith('process-')){App.navigate(cur);}
+      else{App.navigate('project',projectId);}
       App.checkAlerts();
-    }catch(err){Toast.show('오류',err.message,'danger');}
+    }catch(err){
+      // 오류 시 되돌리기
+      checkBtn?.classList.toggle('checked',wasDone);
+      tlCard?.classList.toggle('done',wasDone);
+      procStep?.classList.toggle('done',wasDone);
+      Toast.show('오류',err.message,'danger');
+    }
   },
 
   async saveStepDue(stepId,projectId){
@@ -594,6 +622,10 @@ const App={
   },
 
   async showAddStep(projectId,phase){
+    const steps=await DB.getSteps(projectId);
+    const phaseSteps=steps.filter(s=>s.phase===phase).sort((a,b)=>(a.order_index||0)-(b.order_index||0));
+    const posOpts=`<option value="-1">맨 처음에 추가</option>`
+      +phaseSteps.map((s,i)=>`<option value="${i}" ${i===phaseSteps.length-1?'selected':''}>${i+1}번 (${esc(s.name)}) 다음</option>`).join('');
     Modal.open('단계 추가',`
       <div class="form-grid cols-2">
         <div class="form-field full"><label class="form-label">단계명 <span class="req">*</span></label>
@@ -604,7 +636,9 @@ const App={
           <select class="form-select" id="as-dir">
             <option value="internal">내부</option><option value="outgoing">발신 (→ 외부)</option><option value="incoming">수신 (← 외부)</option>
           </select></div>
-        <div class="form-field"><label class="form-label">단계</label>
+        <div class="form-field"><label class="form-label">삽입 위치</label>
+          <select class="form-select" id="as-pos">${posOpts}</select></div>
+        <div class="form-field"><label class="form-label">단계 구분</label>
           <select class="form-select" id="as-phase">${['수주','발주','청구'].map(ph=>`<option value="${ph}" ${ph===phase?'selected':''}>${ph}</option>`).join('')}</select></div>
         <div class="form-field"><label class="form-label">마감일</label>
           <input type="date" class="form-input" id="as-due"></div>
@@ -621,8 +655,15 @@ const App={
     const name=document.getElementById('as-name')?.value.trim();
     if(!name){Toast.show('필수 입력','단계명을 입력해 주세요.','warning');return;}
     try{
-      const steps=await DB.getSteps(projectId);
       const phase=document.getElementById('as-phase').value;
+      const insertAfter=parseInt(document.getElementById('as-pos')?.value??'-1');
+      const insertAt=insertAfter+1; // 0-based position within phase
+      const allSteps=await DB.getSteps(projectId);
+      const phaseSteps=allSteps.filter(s=>s.phase===phase).sort((a,b)=>(a.order_index||0)-(b.order_index||0));
+      // insertAt 이후 기존 단계들의 order_index를 1씩 밀기
+      for(let i=insertAt;i<phaseSteps.length;i++){
+        await DB.updateStep(phaseSteps[i].id,{order_index:i+1});
+      }
       await DB.addStep({
         id:DB.uid(),project_id:projectId,phase,name,
         document_type:document.getElementById('as-doctype').value,
@@ -631,11 +672,12 @@ const App={
         is_conditional:false,condition_desc:'',done:false,
         due_date:document.getElementById('as-due').value||null,
         notes:document.getElementById('as-notes').value,
-        order_index:steps.filter(s=>s.phase===phase).length
+        order_index:insertAt
       });
       Modal.close();
       App.navigate('project',projectId);
-      Toast.show('추가됨',`"${name}" 단계가 추가되었습니다.`,'success');
+      const posLabel=insertAfter<0?'맨 처음':`${insertAfter+1}번 단계 다음`;
+      Toast.show('추가됨',`"${name}" — ${posLabel}에 추가되었습니다.`,'success');
     }catch(err){Toast.show('오류',err.message,'danger');}
   },
 
@@ -815,7 +857,88 @@ const App={
   },
 
   switchPhase(projectId,phase){DB.updateProject(projectId,{current_phase:phase}).then(()=>App.navigate('project',projectId));},
-  saveSettings(){const d=parseInt(document.getElementById('st-days')?.value)||3;const e=document.getElementById('st-enabled')?.checked;DB.saveSettings({notifyDays:d,notifyEnabled:e});App.checkAlerts();Toast.show('저장됨','설정이 저장되었습니다.','success');}
+  saveSettings(){const d=parseInt(document.getElementById('st-days')?.value)||3;const e=document.getElementById('st-enabled')?.checked;DB.saveSettings({notifyDays:d,notifyEnabled:e});App.checkAlerts();Toast.show('저장됨','설정이 저장되었습니다.','success');},
+
+  // ─── PDF 자동입력 ───
+  async parsePDF(input){
+    const file=input.files?.[0];
+    if(!file)return;
+    const statusEl=document.getElementById('np-pdf-status');
+    if(statusEl)statusEl.textContent='분석 중…';
+    const label=input.closest('label');
+    if(label){label.style.opacity='.5';label.style.pointerEvents='none';}
+    try{
+      const pdfjsLib=window.pdfjsLib;
+      if(!pdfjsLib){Toast.show('오류','PDF 라이브러리 로드 실패','danger');return;}
+      pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      const buf=await file.arrayBuffer();
+      const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      let text='';
+      const pages=Math.min(pdf.numPages,15);
+      for(let i=1;i<=pages;i++){
+        const pg=await pdf.getPage(i);
+        const ct=await pg.getTextContent();
+        text+=ct.items.map(it=>it.str).join(' ')+'\n';
+      }
+      const ex=App._extractFromPDF(text);
+      let filled=0;
+      if(ex.name){const el=document.getElementById('np-name');if(el&&!el.value){el.value=ex.name;filled++;}}
+      if(ex.client){const el=document.getElementById('np-client');if(el){el.value=ex.client;filled++;}}
+      if(ex.manager){const el=document.getElementById('np-manager');if(el){el.value=ex.manager;filled++;}}
+      if(ex.amount){const el=document.getElementById('np-amount');if(el){el.value=ex.amount;filled++;}}
+      if(ex.contractDate){const el=document.getElementById('np-contract');if(el){el.value=ex.contractDate;filled++;}}
+      if(ex.deadline){const el=document.getElementById('np-deadline');if(el){el.value=ex.deadline;filled++;}}
+      if(statusEl)statusEl.textContent=filled>0?`✅ ${filled}개 항목 입력됨`:'항목을 찾지 못했습니다';
+      if(filled>0)Toast.show('PDF 분석 완료',`${filled}개 항목이 자동 입력되었습니다.`,'success');
+      else Toast.show('항목 없음','PDF에서 인식 가능한 항목이 없습니다. 직접 입력해 주세요.','warning');
+    }catch(err){
+      console.error('PDF parse error:',err);
+      if(statusEl)statusEl.textContent='분석 실패';
+      Toast.show('PDF 오류','파일을 읽을 수 없습니다: '+err.message,'danger');
+    }finally{
+      if(label){label.style.opacity='';label.style.pointerEvents='';}
+    }
+  },
+
+  _extractFromPDF(text){
+    const r={};
+    const match=(patterns)=>{for(const re of patterns){const m=text.match(re);if(m)return m[1]?.trim();}return null;};
+    // 사업명
+    r.name=match([
+      /(?:사업명|과업명|용역명|과제명)\s*[:：]\s*([^\n,。]{5,60})/,
+      /제\s*목\s*[:：]\s*([^\n,。]{5,60})/,
+    ]);
+    // 발주처/고객사
+    r.client=match([
+      /(?:발주처|발주기관|수요기관|발주자)\s*[:：]\s*([^\n,]{3,30})/,
+      /(?:기관명|고객사)\s*[:：]\s*([^\n,]{3,30})/,
+    ]);
+    // 담당자
+    r.manager=match([
+      /(?:담당자|사업담당|담당직원)\s*[:：]\s*([가-힣]{2,6})/,
+      /담당\s*[:：]?\s*([가-힣]{2,6})\s*(?:\(|$|\n)/,
+    ]);
+    // 계약금액
+    const amtM=text.match(/(?:계약금액|사업금액|용역금액|총사업비|공급가액)\s*[:：]?\s*([\d,]+)\s*원/)
+              ||text.match(/([\d,]+)\s*원\s*\(VAT\s*포함\)/i)
+              ||text.match(/총\s*금액\s*[:：]?\s*([\d,]+)\s*원/);
+    if(amtM)r.amount=amtM[1].replace(/,/g,'');
+    // 날짜 파싱 헬퍼
+    const dateMatch=(patterns)=>{
+      for(const re of patterns){
+        const m=text.match(re);
+        if(m)return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+      }
+      return null;
+    };
+    r.contractDate=dateMatch([
+      /(?:계약일|착수일|계약체결일)\s*[:：]?\s*(\d{4})[.\-년]\s*(\d{1,2})[.\-월]\s*(\d{1,2})/,
+    ]);
+    r.deadline=dateMatch([
+      /(?:납기일|준공일|완료일|납품기한|종료일)\s*[:：]?\s*(\d{4})[.\-년]\s*(\d{1,2})[.\-월]\s*(\d{1,2})/,
+    ]);
+    return r;
+  }
 };
 
 // ══════════════════════════════════════════════
@@ -871,6 +994,7 @@ const Pages={
   async processView(phase){
     const projects=await DB.getProjects();
     const col=PHASE_COLORS[phase]||'blue';
+    const label=App._PHASE_LABEL[phase]||phase;
     const html=await Promise.all(projects.map(async p=>{
       const steps=(await DB.getSteps(p.id)).filter(s=>s.phase===phase);
       if(steps.length===0)return'';
@@ -892,10 +1016,10 @@ const Pages={
     const filtered=html.filter(Boolean);
     return `
       <div class="section-header mb-3">
-        <div class="section-title"><span class="phase-pill ${col}">${phase}</span> 프로세스 현황</div>
+        <div class="section-title"><span class="phase-pill ${col}">${label}</span> 프로세스 현황</div>
         <button class="btn btn-primary btn-sm" onclick="App.showNewProjectModal()">+ 새 사업</button>
       </div>
-      ${filtered.length===0?`<div class="empty-state"><div class="empty-icon">📂</div><h3>${phase} 단계 사업이 없습니다</h3></div>`
+      ${filtered.length===0?`<div class="empty-state"><div class="empty-icon">📂</div><h3>${label} 단계 사업이 없습니다</h3></div>`
       :`<div style="display:flex;flex-direction:column;gap:16px">${filtered.join('')}</div>`}`;
   },
 
@@ -1008,6 +1132,7 @@ const Pages={
           </div>
           <div class="tl-card-body">
             ${s.is_conditional?`<div class="cond-notice"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>조건: ${esc(s.condition_desc)}</div>`:''}
+            ${s.notes?.startsWith('⚠️')?`<div class="cond-notice" style="background:#FFF1F2;border-color:#FECACA;color:#991B1B"><svg viewBox="0 0 20 20" fill="currentColor" style="color:#EF4444"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>${esc(s.notes)}</div>`:''}
             ${Approval.renderApprovalBox(s)}
             <div class="tl-body-fields">
               <div class="field-row">

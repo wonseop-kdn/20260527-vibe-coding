@@ -174,6 +174,16 @@ const DEFAULT_TEMPLATES_DATA = [
           approver: null, approval_level: null, requires_audit: false,
           regulation_ref: '사규 참조 필요',
           notes: 'AS 충당금 설정 및 처리'
+        },
+        {
+          name: '사업결과보고서 작성 및 결재',
+          document_type: '사업결과보고서',
+          direction: 'internal',
+          category: '보고',
+          is_conditional: false,
+          approver: null, approval_level: null, requires_audit: false,
+          regulation_ref: '사규 참조 필요',
+          notes: '⚠️ 준공 후 1개월 이내 제출 필수. 사업 수행 결과·성과·문제점·개선사항 포함.'
         }
       ]
     }
