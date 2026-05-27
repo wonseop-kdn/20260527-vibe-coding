@@ -55,7 +55,7 @@ const App={
     if('serviceWorker' in navigator){
       navigator.serviceWorker.register('sw.js').catch(()=>{});
     }
-    initDB();
+    await initDB();
     this.bindNav();
     this.bindModal();
     document.getElementById('btn-new-project').addEventListener('click',()=>App.showNewProjectModal());
@@ -137,13 +137,25 @@ const App={
 
   async landingEnter(){
     const q=document.getElementById('landing-search').value.trim();
-    if(!q)return;
-    const projects=await DB.getProjects();
-    const found=projects.find(p=>p.name.toLowerCase()===q.toLowerCase());
-    if(found){App.enterProject(found.id,found.name);}
-    else{
-      // Create new project with this name
-      App._pendingProjectName=q;
+    // 검색어 없으면 대시보드로 바로 입장
+    if(!q){
+      document.getElementById('landing').style.display='none';
+      document.getElementById('app').style.display='flex';
+      document.getElementById('chatbot-fab').style.display='flex';
+      App.navigate('dashboard');
+      App.updateNavCounts();
+      App.checkAlerts();
+      Chatbot.init();
+      return;
+    }
+    try{
+      const projects=await DB.getProjects();
+      const found=projects.find(p=>p.name.toLowerCase()===q.toLowerCase());
+      if(found){App.enterProject(found.id,found.name);}
+      else{App._pendingProjectName=q;App.showNewProjectModal(q);}
+    }catch(err){
+      console.error('landingEnter error:',err);
+      Toast.show('오류','사업 목록을 불러올 수 없습니다. 새 사업을 등록해 주세요.','warning');
       App.showNewProjectModal(q);
     }
   },

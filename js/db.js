@@ -2,16 +2,20 @@
 let _sb = null;
 let _mode = 'local'; // 'supabase' | 'local'
 
-function initDB() {
+async function initDB() {
   if (SUPABASE_URL && SUPABASE_ANON_KEY) {
     try {
       _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      // 실제 연결 테스트 — 테이블 없으면 여기서 에러
+      const { error } = await _sb.from('projects').select('id').limit(1);
+      if (error) throw error;
       _mode = 'supabase';
-      document.getElementById('db-status').textContent = '● Supabase 연결됨';
-      document.getElementById('db-status').className = 'db-badge db-supabase';
+      const el = document.getElementById('db-status');
+      if (el) { el.textContent = '● Supabase 연결됨'; el.className = 'db-badge db-supabase'; }
       console.log('[DB] Supabase 모드');
     } catch (e) {
-      console.warn('[DB] Supabase 초기화 실패, localStorage 사용', e);
+      console.warn('[DB] Supabase 연결 실패 → localStorage 사용', e);
+      _sb = null; _mode = 'local';
     }
   } else {
     console.log('[DB] localStorage 모드');
