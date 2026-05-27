@@ -53,7 +53,8 @@ const DB = {
 
   async addProject(project) {
     if (_mode === 'supabase') {
-      const { data, error } = await _sb.from('projects').insert(project).select().single();
+      const { id, ...rest } = project; // Supabase auto-generates UUID
+      const { data, error } = await _sb.from('projects').insert(rest).select().single();
       if (error) throw error;
       return data;
     }
@@ -97,7 +98,8 @@ const DB = {
 
   async addStep(step) {
     if (_mode === 'supabase') {
-      const { data, error } = await _sb.from('steps').insert(step).select().single();
+      const { id, ...rest } = step; // Supabase auto-generates UUID
+      const { data, error } = await _sb.from('steps').insert(rest).select().single();
       if (error) throw error;
       return data;
     }
@@ -139,7 +141,8 @@ const DB = {
 
   async addRegulation(reg) {
     if (_mode === 'supabase') {
-      const { data, error } = await _sb.from('regulations').insert(reg).select().single();
+      const { id, ...rest } = reg;
+      const { data, error } = await _sb.from('regulations').insert(rest).select().single();
       if (error) throw error;
       return data;
     }
@@ -170,7 +173,8 @@ const DB = {
 
   async addApprovalRule(rule) {
     if (_mode === 'supabase') {
-      const { data, error } = await _sb.from('approval_rules').insert(rule).select().single();
+      const { id, ...rest } = rule;
+      const { data, error } = await _sb.from('approval_rules').insert(rest).select().single();
       if (error) throw error;
       return data;
     }
@@ -236,7 +240,12 @@ const DB = {
   saveSettings(s) { LS.set('bm_settings', s); },
 
   // ── Utils ──
-  uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
+  uid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  },
 
   // ── Export / Import ──
   async exportAll() {
