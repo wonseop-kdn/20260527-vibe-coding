@@ -84,11 +84,16 @@ window.Chatbot = (() => {
         // 3a. Supabase Edge Function 호출
         const regulationsContext = await getRegulationsContext();
 
+        const anonKey = window.SUPABASE_ANON_KEY || '';
         const res = await fetch(`${supabaseUrl}/functions/v1/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${anonKey}`,
+            'apikey': anonKey,
+          },
           body: JSON.stringify({
-            messages: messages.slice(-10), // 최근 10개 메시지만 전송
+            messages: messages.slice(-10),
             regulationsContext,
           }),
         });
